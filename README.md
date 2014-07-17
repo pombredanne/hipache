@@ -1,10 +1,18 @@
 Hipache: a distributed HTTP and websocket proxy
 ===============================================
 
+[![NPM version][npm-image]][npm-url] [![Build Status][travis-image]][travis-url]  [![Dependency Status][depstat-image]][depstat-url] [![Coverage Status][coveralls-image]][coveralls-url] [![Code Climate][codeclimate-image]][codeclimate-url] [![Stories in Ready][waffle-image]][waffle-url]
+
+WARNING
+-----------
+
+This is the documentation for `master`. If you are running Hipache release, you should look at the documentation on the `0.3` branch.
+
+
 What is it?
 -----------
 
-Hipache is a distributed proxy designed to route high volumes of http and
+Hipache (pronounce `hɪ'pætʃɪ`) is a distributed proxy designed to route high volumes of http and
 websocket traffic to unusually large numbers of virtual hosts, in a highly
 dynamic topology where backends are added and removed several times per second.
 It is particularly well-suited for PaaS (platform-as-a-service) and other
@@ -20,7 +28,7 @@ Hipache is based on the node-http-proxy library.
 Run it!
 -------
 
-### 1. Install it
+### 1. Installation
 
 From the shell:
 
@@ -29,84 +37,87 @@ From the shell:
 *The '-g' option will make the 'hipache' bin-script available system-wide (usually linked from '/usr/local/bin')*
 
 
-### 2. Configuring the server (config.json)
+### 2. Configuration (config.json)
 
-dotCloud proxy2 uses a Redis server to manage its configuration (and to share
-its state across the multiple workers). You can use the Redis server to change
-its configuration while it's running or simply check the health state of a
-backend.
+Basic Hipache configuration is described in a json file. For example:
 
     {
         "server": {
             "accessLog": "/var/log/hipache_access.log",
-            "port": 80,
             "workers": 5,
             "maxSockets": 100,
             "deadBackendTTL": 30,
-            "address": ["127.0.0.1"],
-            "address6": ["::1"],
-            "https": {
-                "port": 443,
-                "key": "/etc/ssl/ssl.key",
-                "cert": "/etc/ssl/ssl.crt"
-            }
         },
-        "redisHost": "127.0.0.1",
-	    "redisPort": 6379,
-        "redisDatabase": 0,
-        "redisPassword": "password"
-        
+        "http": {
+            "port": 80,
+            "bind": ["127.0.0.1", "::1"],
+        },
+        "https": {
+            "port": 443,
+            "bind": ["127.0.0.1", "::1"]
+            "key": "/etc/ssl/ssl.key",
+            "cert": "/etc/ssl/ssl.crt"
+        },
+        "driver": "redis://:password@127.0.0.1:6379/0"
     }
 
-* __server.accessLog__: location of the Access logs, the format is the same as
-nginx
-* __server.port__: Port to listen to (HTTP)
-* __server.workers__: Number of workers to be spawned (specify at least 1, the
-master process does not serve any request)
-* __server.maxSockets__: The maximum number of sockets which can be opened on
-each backend (per worker)
-* __server.deadBackendTTL__: The number of seconds a backend is flagged as
-`dead' before retrying to proxy another request to it
-* __server.address__: IPv4 Addresses  listening (HTTP and HTTPS)
-* __server.address6__: IPv6 Addresses  listening (HTTP and HTTPS)
-* __server.https__: SSL configuration (omit this section to disable HTTPS)
-* __redisHost__ and __redisPort__: Redis configuration (you can omit those
-parameters to use the local redis on the default port)
-* __redisDatabase__: Redis number database (default 0)
-* __redisPassword__: Redis password (you can omit this if Redis doesn't require auth)
+ * __server__: generic server settings, like acceslog location, or number of workers
+    * __server.accessLog__: location of the Access logs, the format is the same as
+nginx. Defaults to `/var/log/hipache/access.log` if not specified.
+    * __server.workers__: Number of workers to be spawned. You need to request to have at least 1 woker, as the
+master process does not serve any request. Defaults to `10` if not specified.
+    * __server.maxSockets__: The maximum number of sockets which can be opened on each backend (per worker). Defaults to `100` if not specified.
+    * __server.deadBackendTTL__: The number of seconds a backend is flagged as
+'dead' before retrying to proxy another request to it (doesn't apply if you are using a third-party health checker). Defaults to `30`.
+ * __http__: specifies on which ips/ports hipache will listen for http traffic. By default, hipache listens only on 127.0.0.1:80
+    * __http.port__: port to listen to for http. Defaults to `80`.
+    * __http.bind__: IPv4 (or IPv6) address, or addresses to listen to. You can specify a single ip, an array of ips, or an array of objects `{address: IP, port: PORT}` if you want to use a specific port on a specific ip. Defaults to `127.0.0.1`.
+ * __http__: specifies on which ips/ports hipache will listen for https traffic. By default, hipache doesn't listens for https traffic.
+    * __https.port__: port to listen to for https. Defaults to `443`.
+    * __https.key__: path to key file to use. No default.
+    * __https.passphrase__: optional passphrase for the key file.
+    * __https.cert__: path to certificate file to use. No default.
+    * __https.ca__: optional path to additional CA file to serve. Might be a string, or an array.
+    * __https.bind__: similarly to http.bind, you can specific a single ip, an array of ip, or an array of objects to override the port, key/cert/ca files on a per-ip basis.
+* __driver__: Redis url to connect to for dynamic vhost configurations. If you want a master/slave Redis, specify a second url for the master, eg: `driver: ["redis://slave:port", "redis://master:port"]`. More generally, the driver syntax is: `redis://:password@host:port/database#prefix` - all parameter are optional, hence just `redis:` is a valid driver uri. More infos about drivers in [lib/drivers](https://github.com/dotcloud/hipache/tree/master/lib/drivers). You can omit this entirely to use the local redis on the default port, which is the default.
+* __user__: if starting as root (which you might do if you want to use a privileged port), will drop root privileges as soon as it's bound. Defaults to `www-data`. Note that you MUST specify a user if you start hipache as root. You can specify `user: root` if you don't mind (strongly discouraged!). You can use either user names or ids.
+* __group__: if starting as root, will downgrade group to this. If left empty, will try to downgrade to a group named after the specified `user`. Defaults to `www-data`.
 
+### 3. Spawning
 
-### 3. Spawn the server
-
-From the shell:
+From the shell (defaults to using the `config/config.json` file):
 
     $ hipache
 
-Or if you use the port 80:
+If you use a privileged port (eg: 80):
 
     $ sudo hipache
 
-Or by specifying your configuration file:
+If you want to use a specific configuration file:
 
-    $ hipache --config config.json
+    $ hipache --config path/to/someConfig.json
+
+If you want to just test a specific configuration file:
+
+    $ hipache --dry --config path/to/someConfig.json
 
 __Managing multiple configuration files:__
 
-The default configuration file is `config.json`. It's possible to have
-different configuration files named `config_<suffix>.json`. The suffix is got
-from an environment variable called `SETTINGS_FLAVOR`.
+The default configuration file is `config/config.json`. It's possible to have
+different configuration files named `config_<suffix>.json`, where the suffix
+is the value of an environment variable named `SETTINGS_FLAVOR`.
 
 For instance, here is how to spawn the server with the `config_test.json`
 configuration file in order to run the tests.
 
     $ SETTINGS_FLAVOR=test hipache
-    
+
 
 ### 4. Configuring a vhost (redis)
 
-All the configuration is managed through Redis. This makes it possible to
+All vhost configuration is managed through Redis. This makes it possible to
 update the configuration dynamically and gracefully while the server is
-running.
+running, and have that state shared accross workers and even accross Hipache instances.
 
 It also makes it simple to write configuration adapters. It would be trivial
 to load a plain text configuration file into Redis (and update it at runtime).
@@ -160,6 +171,8 @@ stop hipache
 restart hipache
 ```
 
+The configuration file used is `/etc/hipache.json`.
+
 Features
 --------
 
@@ -170,7 +183,7 @@ As seen in the example above, multiple backends can be attached to a frontend.
 All requests coming to the frontend are load-balanced across all healthy
 backends.
 
-The backend to use for a specific request is determined at random. Subsequent
+The backend to use for a specific request is determined randomly. Subsequent
 requests coming from the same client won't necessarily be routed to the same
 backend (since backend selection is purely random).
 
@@ -213,13 +226,11 @@ So fast, that it didn't increase measurably the HTTP request latency!
 ### WebSocket
 
 Hipache supports the WebSocket protocol. It doesn't do any fancy handling
-for the WebSocket protocol; it relies entirely on the support in NodeJS
-and node-http-proxy.
+on its own and relies entirely on NodeJS and node-http-proxy.
 
 ### SSL
 
-If provided with a SSL private key and certificate, Hipache will support SSL
-connections, for "regular" requests as well as WebSocket upgrades.
+Hipache supports SSL for "regular" requests as well as WebSocket upgrades.
 
 ### Custom HTML error pages
 
@@ -232,24 +243,41 @@ Those error pages can be customized.
 When adding virtual hosts in Hipache configuration, you can specify wildcards.
 E.g., instead (or in addition to) www.example.tld, you can insert
 *.example.tld. Hipache will look for an exact match first, and then for a
-wildcard one.
-
-Note that the current implementation only tries to match wildcards against the
-last two labels of the requested virtual host. What does that mean? If you
-issue a request for some.thing.example.tld, Hipache will look for *.example.tld
-in the configuration, but not for *.thing.example.tld. If you want to serve
-requests for *.thing.example.tld, you will have to setup a wildcard for
-*.example.tld. It means that you cannot (yet) send requests for
-*.thing.example.tld and *.stuff.example.tld to different backends.
+wildcard one up to 5 subdomains deep, e.g. foo.bar.baz.qux.quux will attempt to
+match itself first, then *.bar.baz.qux.quux, then *.baz.qux.quux, etc.
 
 ### Active Health-Check
 
 Even though Hipache support passive health checks, it's also possible to run
-active health checks. This mechanism requires to run an external program,
-you can find it on the [hipache-hchecker project page.](https://github.com/samalba/hipache-hchecker)
+active health checks. This mechanism requires to run an external program (see third-party softwares below).
 
 
-Future improvements
+Third party softwares of interest
 -------------------
 
-[Read the TODO page](https://github.com/dotcloud/hipache/blob/master/TODO.md)
+Health-checkers:
+
+ * [hipache-hchecker (golang)](https://github.com/samalba/hipache-hchecker)
+ * [hipcheck (node.js)](https://github.com/runnable/hipcheck).
+
+A web interface to manage vhosts:
+
+ * [airfield](https://github.com/emblica/airfield)
+
+[npm-url]: https://npmjs.org/package/hipache
+[npm-image]: https://badge.fury.io/js/hipache.png
+
+[travis-url]: http://travis-ci.org/dotcloud/hipache
+[travis-image]: https://secure.travis-ci.org/dotcloud/hipache.png?branch=master
+
+[coveralls-url]: https://coveralls.io/r/dotcloud/hipache
+[coveralls-image]: https://coveralls.io/repos/dotcloud/hipache/badge.png?branch=master
+
+[depstat-url]: https://david-dm.org/dotcloud/hipache
+[depstat-image]: https://david-dm.org/dotcloud/hipache.png
+
+[codeclimate-url]: https://codeclimate.com/github/dotcloud/hipache
+[codeclimate-image]: https://codeclimate.com/github/dotcloud/hipache.png
+
+[waffle-url]: https://waffle.io/dotcloud/hipache
+[waffle-image]: https://badge.waffle.io/dotcloud/hipache.png?label=in%20progress&title=Ready

@@ -1,4 +1,5 @@
-#!/usr/bin/env node
+#!/bin/sh
+':' //; exec "$(command -v nodejs || command -v node)" --expose-gc --always-compact -- "$0" "$@"
 
 'use strict';
 
@@ -6,9 +7,10 @@ var fs = require('fs'),
     path = require('path'),
     cluster = require('cluster'),
     util = require('util'),
-    argv = require('optimist').argv,
+    argv = require('minimist')(process.argv.slice(2)),
+    Config = require('../lib/config/config'),
     master = require('../lib/master'),
-    worker = require('../lib/worker');
+    Worker = require('../lib/worker');
 
 var help = [
     'usage: hipache [options]',
@@ -17,37 +19,56 @@ var help = [
     '',
     'options:',
     '   -c, --config CONFIGFILE     Location of the configuration file',
+    '   -d, --dry                   Test configuration and exit (doesn\'t actually start hipache)',
     '   -h, --help                  Display help'
 ].join('\n');
-
-var config;
-
 
 if (argv.h || argv.help) {
     return util.puts(help);
 }
 
-if (argv.c || argv.config) {
-    var configFile = argv.c ? argv.c : argv.config;
-    var data = fs.readFileSync(configFile);
-    util.log('Loading config from ' + configFile);
-    config = JSON.parse(data);
-} else {
-    config = (function (configFile) {
-        if (process.env.SETTINGS_FLAVOR !== undefined) {
-            path = configFile.replace(/\.json$/, '_' + process.env.SETTINGS_FLAVOR + '.json');
-        }
-        util.log('Loading config from ' + configFile);
-        var data = fs.readFileSync(configFile);
-        return JSON.parse(data);
-    }(path.resolve(__dirname, '..', 'config', 'config.json')));
+var configFile = argv.c || argv.config;
+
+if (!configFile) {
+    configFile = path.resolve(__dirname, '..', 'config', 'config.json');
+    if (process.env.SETTINGS_FLAVOR !== undefined) {
+        configFile = configFile.replace(/\.json$/, '_' + process.env.SETTINGS_FLAVOR + '.json');
+    }
 }
 
-if (cluster.isMaster) {
-    // Run the master
-    master(config);
-    util.log('Server is running. ' + JSON.stringify(config.server));
-} else {
-    // Run the worker
-    worker(config);
-}
+util.log('Loading config from ' + configFile);
+
+fs.readFile(configFile, function (err, data) {
+    if (err) {
+        throw new Error('Couldn\'t locate requested config file at: ' + configFile);
+    }
+
+    var config;
+    try {
+        config = new Config(data);
+    } catch (e) {
+        util.log('Failed loading your configuration!');
+        throw e;
+    }
+
+    // Wait for configuration to say ready...
+    config.once('ready', function () {
+
+        if (argv.d || argv.dry) {
+            util.log('Configuration file looks ok. Here is the result:');
+            util.log(config.inspect());
+            return;
+        }
+
+        if (cluster.isMaster) {
+            // Run the master
+            var m = master(config);
+            m.run();
+            util.log('Server is running.');
+        } else {
+            // Run the worker
+            var w = new Worker(config);
+            w.run();
+        }
+    });
+});
